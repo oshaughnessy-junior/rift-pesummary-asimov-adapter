@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/oshaughnessy-junior/rift-pesummary-asimov-adapter/schema/rift-assets-v1.schema.json",
+  "title": "RIFT ASIMOV assets v1",
+  "type": "object",
+  "required": ["asset_contract", "samples", "config", "provenance"],
+  "properties": {
+    "asset_contract": {"const": "rift-assets/v1"},
+    "samples": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "config": {
+      "oneOf": [
+        {"type": "string", "minLength": 1},
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        }
+      ]
+    },
+    "psds": {"$ref": "#/$defs/detectorPaths"},
+    "calibration": {"$ref": "#/$defs/detectorPaths"},
+    "lnL_marg": {"type": "string"},
+    "samples_raw": {"type": "string"},
+    "samples_calmarg": {"type": "string"},
+    "provenance": {
+      "type": "object",
+      "required": ["pipeline", "event", "analysis"],
+      "properties": {
+        "pipeline": {"const": "rift"},
+        "event": {"type": "string", "minLength": 1},
+        "analysis": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "detectorPaths": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "minLength": 1}
+    }
+  },
+  "additionalProperties": true
+}

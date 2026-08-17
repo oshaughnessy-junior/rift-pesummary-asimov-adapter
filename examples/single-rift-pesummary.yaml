@@ -1,0 +1,10 @@
+# Replace the dependency name with the completed RIFT analysis in the event.
+kind: analysis
+name: rift-pesummary
+pipeline: rift-pesummary
+needs:
+  - rift-SEOBNRv5PHM
+postprocessing:
+  pesummary:
+    multiprocess: 4
+    accounting group: ligo.dev.o4.cbc.pe.rift

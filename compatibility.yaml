@@ -1,0 +1,22 @@
+contract: rift-assets/v1
+adapter: 0.1.0a1
+supported:
+  - rift: 0.0.17.13
+    branch: rift_O4c
+    asimov: ">=0.7,<0.8"
+    pesummary: ">=1.6"
+  - rift: 0.0.18.0rc2
+    branch: rift_O4d
+    asimov: ">=0.7,<0.8"
+    pesummary: ">=1.6"
+canary:
+  date: "2026-08-17"
+  asimov: "0.7.0"
+  pesummary_branch: master
+  pesummary_commit: 3bc32e9e37cb247131e8e0fccfbf283fa6e732d7
+  rift_branch: rift_O4d
+  rift_commit: 6ed3d5803ac9327d4afd17401e5251848af5e7f9
+  adapter_commit: 72b480dffdaaedd02379c9b3b05c980c80086e20
+  result: "43 passed; dual standard/calmarg PSD and calibration parser canary passed"
+  note: "The official ASIMOV master predates 0.7; 0.7.0 is the newest available tree. Adapter labels are underscore-safe for PESummary dynamic arguments."
+  blocking: false
