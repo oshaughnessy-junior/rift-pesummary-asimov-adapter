@@ -17,7 +17,10 @@ from asimov.pipeline import Pipeline, PipelineException
 
 
 ASSET_CONTRACT = "rift-assets/v1"
-_SAFE_LABEL = re.compile(r"[^A-Za-z0-9_.-]+")
+# argparse normalises hyphens in option destinations to underscores.  Since
+# PESummary looks up dynamic ``--<label>_psd`` and calibration destinations by
+# the literal label, generated labels must already be valid option destinations.
+_SAFE_LABEL = re.compile(r"[^A-Za-z0-9_]+")
 _RESERVED_ADDITIONAL_ARGUMENTS = {
     "webdir",
     "labels",

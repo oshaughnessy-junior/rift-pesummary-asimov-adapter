@@ -150,8 +150,8 @@ def test_combined_command_aligns_all_rift_metadata(configured):
     command = RIFTPESummary(prod).build_command()
 
     assert values_after(command, "--labels", ["--gw"]) == [
-        "rift-v5PHM",
-        "rift-XPHM",
+        "rift_v5PHM",
+        "rift_XPHM",
     ]
     assert values_after(command, "--approximant", ["--f_low"]) == [
         "SEOBNRv5PHM",
@@ -164,15 +164,15 @@ def test_combined_command_aligns_all_rift_metadata(configured):
         str(configured / "rift-XPHM.dat"),
     ]
     assert values_after(
-        command, "--config", ["--rift-v5PHM_psd"]
+        command, "--config", ["--rift_v5PHM_psd"]
     ) == [
         str(configured / "rift-v5PHM.ini"),
         str(configured / "rift-XPHM.ini"),
     ]
-    assert command[command.index("--rift-v5PHM_psd") + 1] == (
+    assert command[command.index("--rift_v5PHM_psd") + 1] == (
         f"H1:{configured / 'H1-a-psd.dat'}"
     )
-    assert command[command.index("--rift-XPHM_calibration") + 1] == (
+    assert command[command.index("--rift_XPHM_calibration") + 1] == (
         f"H1:{configured / 'H1-b-cal.dat'}"
     )
     assert "--evolve_spins_forwards" in command
@@ -192,7 +192,7 @@ def test_single_dependency_uses_same_contract(configured):
 
     command = RIFTPESummary(prod).build_command()
 
-    assert values_after(command, "--labels", ["--gw"]) == ["rift-single"]
+    assert values_after(command, "--labels", ["--gw"]) == ["rift_single"]
     assert values_after(command, "--samples", ["--config"]) == [
         str(configured / "rift-single.dat")
     ]
@@ -208,10 +208,10 @@ def test_multiple_samples_get_unique_aligned_labels(configured):
     command = RIFTPESummary(prod).build_command()
 
     assert values_after(command, "--labels", ["--gw"]) == [
-        "rift_multi-1",
-        "rift_multi-2",
+        "rift_multi_1",
+        "rift_multi_2",
     ]
-    assert len(values_after(command, "--config", ["--rift_multi-1_psd"])) == 2
+    assert len(values_after(command, "--config", ["--rift_multi_1_psd"])) == 2
 
 
 def test_all_sample_variants_include_standard_and_calmarg(configured):
@@ -232,15 +232,15 @@ def test_all_sample_variants_include_standard_and_calmarg(configured):
     command = RIFTPESummary(prod).build_command()
 
     assert values_after(command, "--labels", ["--gw"]) == [
-        "rift-both-standard",
-        "rift-both-calmarg",
+        "rift_both_standard",
+        "rift_both_calmarg",
     ]
     assert values_after(command, "--samples", ["--config"]) == [
         str(configured / "rift-both.dat"),
         str(configured / "rift-both-calmarg.dat"),
     ]
     assert len(
-        values_after(command, "--config", ["--rift-both-standard_psd"])
+        values_after(command, "--config", ["--rift_both_standard_psd"])
     ) == 2
 
 
@@ -350,8 +350,8 @@ def test_processing_completion_uses_variant_labels(configured):
     posterior = Path(adapter.webdir) / "samples" / "posterior_samples.h5"
     posterior.parent.mkdir(parents=True)
     with h5py.File(posterior, "w") as result:
-        result.create_group("rift-both-standard")
-        result.create_group("rift-both-calmarg")
+        result.create_group("rift_both_standard")
+        result.create_group("rift_both_calmarg")
 
     assert adapter.detect_completion_processing() is True
 
@@ -398,12 +398,12 @@ def test_optional_all_net_capture_publishes_copy(configured):
     adapter = RIFTPESummary(prod)
 
     assert adapter.build_dag(dryrun=True) == 0
-    expected = Path(adapter.rundir) / "auxiliary" / "rift-grid" / "all.net"
+    expected = Path(adapter.rundir) / "auxiliary" / "rift_grid" / "all.net"
     assert expected.read_text() == "# marginalized likelihood grid\n"
     assert adapter.collect_assets()["likelihood"] == {
-        "rift-grid": str(expected)
+        "rift_grid": str(expected)
     }
-    assert adapter.results()["likelihood"] == {"rift-grid": str(expected)}
+    assert adapter.results()["likelihood"] == {"rift_grid": str(expected)}
 
 
 def test_collect_assets_and_completion_location(configured):
