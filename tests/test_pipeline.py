@@ -2,6 +2,7 @@ import configparser
 import importlib.metadata
 import json
 from pathlib import Path
+import sys
 import types
 
 import pytest
@@ -85,6 +86,7 @@ def configured(monkeypatch, tmp_path):
         ("project", "root"): str(tmp_path),
         ("pipelines", "environment"): "/opt/igwn",
         ("condor", "user"): "rift-ci",
+        ("condor", "scheduler"): "rift-schedd",
     }
 
     def fake_get(section, option):
@@ -254,6 +256,15 @@ def test_explicit_missing_calmarg_is_an_error(configured):
         RIFTPESummary(prod).build_command()
 
 
+def test_missing_managed_asset_is_rejected_before_submission(configured):
+    analysis = source(configured, "rift-missing", "SEOBNRv5PHM", 20, 20)
+    Path(analysis.pipeline.assets["psds"]["H1"]).unlink()
+    prod = production(configured, [analysis])
+
+    with pytest.raises(PipelineException, match="missing psds"):
+        RIFTPESummary(prod).build_command()
+
+
 def test_rejects_old_or_unknown_asset_contract(configured):
     analysis = source(configured, "rift-old", "SEOBNRv5PHM", 20, 20)
     analysis.pipeline.assets["asset_contract"] = "rift-assets/v2"
@@ -294,9 +305,11 @@ def test_dryrun_writes_reproducible_script_without_submission(configured):
     script = Path(adapter.rundir) / "pesummary.sh"
     assert script.exists()
     text = script.read_text()
-    assert text.startswith("/opt/igwn/bin/summarypages ")
+    assert text.startswith("#!/bin/bash\nset -euo pipefail\n")
+    assert "/opt/igwn/bin/summarypages " in text
     assert "--samples" in text
     assert "--config" in text
+    assert script.stat().st_mode & 0o111
 
 
 def test_build_phase_writes_script(configured):
@@ -305,6 +318,67 @@ def test_build_phase_writes_script(configured):
 
     assert adapter.build_dag(dryrun=True) == 0
     assert (Path(adapter.rundir) / "pesummary.sh").exists()
+
+
+def test_refresh_archives_old_page_and_rejects_stale_completion(configured):
+    analysis = source(configured, "rift-single", "SEOBNRv5PHM", 20, 20)
+    adapter = RIFTPESummary(production(configured, [analysis]))
+    posterior = Path(adapter.webdir) / "samples" / "posterior_samples.h5"
+    posterior.parent.mkdir(parents=True)
+    posterior.write_text("old")
+
+    backup = adapter._prepare_output_directory()
+
+    assert backup is not None and (backup / "samples" / posterior.name).exists()
+    assert not Path(adapter.webdir).exists()
+    assert adapter.detect_completion() is False
+
+
+def test_processing_completion_uses_variant_labels(configured):
+    h5py = pytest.importorskip("h5py")
+    analysis = source(
+        configured, "rift-both", "SEOBNRv5PHM", 20, 20, calmarg=True
+    )
+    adapter = RIFTPESummary(
+        production(
+            configured,
+            [analysis],
+            settings={"sample variants": "all"},
+        )
+    )
+    adapter.build_command()
+    posterior = Path(adapter.webdir) / "samples" / "posterior_samples.h5"
+    posterior.parent.mkdir(parents=True)
+    with h5py.File(posterior, "w") as result:
+        result.create_group("rift-both-standard")
+        result.create_group("rift-both-calmarg")
+
+    assert adapter.detect_completion_processing() is True
+
+
+def test_configured_scheduler_failure_does_not_fall_back(configured, monkeypatch):
+    analysis = source(configured, "rift-single", "SEOBNRv5PHM", 20, 20)
+    adapter = RIFTPESummary(production(configured, [analysis]))
+
+    class Submit:
+        def __init__(self, description):
+            assert description["executable"].endswith("pesummary.sh")
+            assert "arguments" not in description
+
+    class Collector:
+        def locate(self, daemon_type, name):
+            raise RuntimeError("collector unavailable")
+
+    fake_htcondor = types.SimpleNamespace(
+        Submit=Submit,
+        Collector=Collector,
+        Schedd=lambda *args: pytest.fail("must not fall back to default schedd"),
+        DaemonTypes=types.SimpleNamespace(Schedd="Schedd"),
+    )
+    monkeypatch.setitem(sys.modules, "htcondor2", fake_htcondor)
+
+    with pytest.raises(PipelineException, match="rift-schedd"):
+        adapter.submit_dag()
 
 
 def test_optional_all_net_capture_publishes_copy(configured):

@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import shlex
 import shutil
+import time
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from asimov import config
@@ -215,6 +216,16 @@ class RIFTPESummary(Pipeline):
             raise PipelineException(f"RIFT asset '{key}' must map detector names to paths")
         return {str(ifo): _absolute(path) for ifo, path in mapping.items()}
 
+    @staticmethod
+    def _validate_paths(
+        paths: Iterable[str], *, field: str, analysis: str
+    ) -> None:
+        missing = [path for path in paths if not os.path.isfile(path)]
+        if missing:
+            raise PipelineException(
+                f"RIFT {analysis} publishes missing {field}: {missing}"
+            )
+
     def _sample_variant_request(self) -> List[str]:
         requested = self.meta.get("sample variants", "preferred")
         if isinstance(requested, str):
@@ -325,6 +336,16 @@ class RIFTPESummary(Pipeline):
             f_ref = self._frequency(source, "waveform", "reference frequency")
             psds = self._detector_paths(assets, "psds")
             calibration = self._detector_paths(assets, "calibration")
+            self._validate_paths(
+                [sample for _, sample in samples],
+                field="samples",
+                analysis=source.name,
+            )
+            self._validate_paths(configs, field="config", analysis=source.name)
+            self._validate_paths(psds.values(), field="psds", analysis=source.name)
+            self._validate_paths(
+                calibration.values(), field="calibration", analysis=source.name
+            )
 
             for index, ((variant, sample), config_path) in enumerate(
                 zip(samples, configs), start=1
@@ -436,6 +457,7 @@ class RIFTPESummary(Pipeline):
     def build_command(self) -> List[str]:
         """Return the argument vector passed to ``summarypages``."""
         inputs = self._inputs()
+        self._expected_labels = [item.label for item in inputs]
         command = [
             "--webdir",
             self.webdir,
@@ -497,10 +519,38 @@ class RIFTPESummary(Pipeline):
         command.extend(self._additional_arguments())
         return command
 
-    def _write_script(self, command: Sequence[str]) -> None:
+    def _write_script(self, command: Sequence[str]) -> Path:
         Path(self.rundir).mkdir(parents=True, exist_ok=True)
         script = Path(self.rundir) / "pesummary.sh"
-        script.write_text(shlex.join([self.executable, *command]) + "\n")
+        script.write_text(
+            "#!/bin/bash\nset -euo pipefail\n"
+            + shlex.join([self.executable, *command])
+            + "\n"
+        )
+        script.chmod(0o755)
+        return script
+
+    def _prepare_output_directory(self) -> Optional[Path]:
+        """Archive an earlier page before a refresh and mark this attempt."""
+        webdir = Path(self.webdir)
+        backup = None
+        if webdir.exists():
+            backup = webdir.with_name(
+                f".{webdir.name}.archive-{time.time_ns()}"
+            )
+            os.replace(webdir, backup)
+        marker = Path(self.rundir) / "submission.marker"
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(f"{time.time_ns()}\n")
+        return backup
+
+    def _restore_output_directory(self, backup: Optional[Path]) -> None:
+        """Restore an archived page when submission itself fails."""
+        marker = Path(self.rundir) / "submission.marker"
+        if marker.exists():
+            marker.unlink()
+        if backup is not None and backup.exists() and not Path(self.webdir).exists():
+            os.replace(backup, self.webdir)
 
     def build_dag(self, user=None, dryrun=False):
         """Materialise the reproducible command used by ASIMOV's build phase."""
@@ -516,12 +566,11 @@ class RIFTPESummary(Pipeline):
     def submit_dag(self, dryrun=False):
         """Write and optionally submit the PESummary HTCondor job."""
         command = self.build_command()
-        self._write_script(command)
+        script = self._write_script(command)
         self._captured_likelihood_assets(copy=True)
 
         submit_description = {
-            "executable": self.executable,
-            "arguments": shlex.join(command),
+            "executable": str(script),
             "output": str(Path(self.rundir) / "pesummary.out"),
             "error": str(Path(self.rundir) / "pesummary.err"),
             "log": str(Path(self.rundir) / "pesummary.log"),
@@ -548,20 +597,66 @@ class RIFTPESummary(Pipeline):
         submit = htcondor.Submit(submit_description)
         try:
             scheduler_name = config.get("condor", "scheduler")
-            ad = htcondor.Collector().locate(htcondor.DaemonTypes.Schedd, scheduler_name)
-            schedd = htcondor.Schedd(ad)
-        except Exception:
+        except (configparser.NoOptionError, configparser.NoSectionError):
+            scheduler_name = None
+        if scheduler_name:
+            try:
+                ad = htcondor.Collector().locate(
+                    htcondor.DaemonTypes.Schedd, scheduler_name
+                )
+                schedd = htcondor.Schedd(ad)
+            except Exception as exc:
+                raise PipelineException(
+                    f"Unable to locate configured HTCondor scheduler "
+                    f"{scheduler_name!r}: {exc}",
+                    production=self.production.name,
+                ) from exc
+        else:
             schedd = htcondor.Schedd()
-        with schedd.transaction() as transaction:
-            cluster = submit.queue(transaction)
+        backup = self._prepare_output_directory()
+        try:
+            with schedd.transaction() as transaction:
+                cluster = submit.queue(transaction)
+        except Exception:
+            self._restore_output_directory(backup)
+            raise
         self.production.meta["job id"] = int(cluster)
         self.production.status = "running"
         return cluster
 
     def detect_completion(self):
-        return os.path.exists(
-            os.path.join(self.webdir, "samples", "posterior_samples.h5")
-        )
+        posterior = Path(self.webdir) / "samples" / "posterior_samples.h5"
+        if not posterior.exists():
+            return False
+        marker = Path(self.rundir) / "submission.marker"
+        if marker.exists() and posterior.stat().st_mtime_ns < marker.stat().st_mtime_ns:
+            return False
+        return True
+
+    def detect_completion_processing(self):
+        """Validate freshness and the actual labels written for this attempt."""
+        if not self.detect_completion():
+            return False
+        labels = getattr(self, "_expected_labels", None)
+        if not labels:
+            labels = [item.label for item in self._inputs()]
+        posterior = Path(self.webdir) / "samples" / "posterior_samples.h5"
+        try:
+            import h5py
+        except ImportError:  # pragma: no cover - ASIMOV production env has h5py
+            return True
+        try:
+            with h5py.File(posterior, "r") as result:
+                available = set(result.keys())
+        except (OSError, IOError):
+            return False
+        missing = [label for label in labels if label not in available]
+        if missing:
+            self.logger.warning(
+                "PESummary output is missing expected labels %s", missing
+            )
+            return False
+        return True
 
     def collect_assets(self):
         assets = {
