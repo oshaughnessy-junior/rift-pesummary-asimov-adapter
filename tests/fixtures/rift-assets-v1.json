@@ -1,0 +1,17 @@
+{
+  "asset_contract": "rift-assets/v1",
+  "samples": ["/tmp/rift/extrinsic_posterior_samples.dat"],
+  "config": "/tmp/repository/C01_offline/rift.ini",
+  "psds": {"H1": "/tmp/H1-psd.dat", "L1": "/tmp/L1-psd.dat"},
+  "calibration": {
+    "H1": "/tmp/H1-calibration.dat",
+    "L1": "/tmp/L1-calibration.dat"
+  },
+  "lnL_marg": "/tmp/rift/all.net",
+  "samples_raw": "/tmp/rift/extrinsic_posterior_samples.dat",
+  "provenance": {
+    "pipeline": "rift",
+    "event": "S250202cu",
+    "analysis": "rift-SEOBNRv5PHM"
+  }
+}

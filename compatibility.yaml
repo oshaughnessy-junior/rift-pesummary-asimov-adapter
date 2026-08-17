@@ -1,0 +1,14 @@
+contract: rift-assets/v1
+adapter: 0.1.0a1
+supported:
+  - rift: 0.0.17.13
+    branch: rift_O4c
+    asimov: ">=0.7,<0.8"
+    pesummary: ">=1.6"
+  - rift: 0.0.18.0rc2
+    branch: rift_O4d
+    asimov: ">=0.7,<0.8"
+    pesummary: ">=1.6"
+canary:
+  asimov: development-head
+  blocking: false

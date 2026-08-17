@@ -1,0 +1,11 @@
+kind: analysis
+name: combined-rift-pesummary
+pipeline: rift-pesummary
+analyses:
+  - pipeline:rift
+postprocessing:
+  pesummary:
+    multiprocess: 4
+    accounting group: ligo.dev.o4.cbc.pe.rift
+    additional arguments:
+      publication: null
