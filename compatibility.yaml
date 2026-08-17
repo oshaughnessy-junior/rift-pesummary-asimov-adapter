@@ -1,5 +1,5 @@
 contract: rift-assets/v1
-adapter: 0.1.0a1
+adapter: 0.1.0a2
 supported:
   - rift: 0.0.17.13
     branch: rift_O4c

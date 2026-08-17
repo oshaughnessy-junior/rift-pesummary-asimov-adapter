@@ -3,4 +3,4 @@
 from .pipeline import RIFTPESummary
 
 __all__ = ["RIFTPESummary"]
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"

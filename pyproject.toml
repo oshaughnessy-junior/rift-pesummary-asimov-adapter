@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rift-pesummary-asimov-adapter"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "ASIMOV 0.7+ adapter for RIFT PESummary postprocessing"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = {file = "LICENSE"}
 authors = [
   {name = "RIFT contributors"},
