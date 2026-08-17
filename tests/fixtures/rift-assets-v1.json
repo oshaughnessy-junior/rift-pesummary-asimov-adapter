@@ -9,6 +9,7 @@
   },
   "lnL_marg": "/tmp/rift/all.net",
   "samples_raw": "/tmp/rift/extrinsic_posterior_samples.dat",
+  "samples_calmarg": "/tmp/rift/reweighted_posterior_samples.dat",
   "provenance": {
     "pipeline": "rift",
     "event": "S250202cu",

@@ -29,4 +29,5 @@ blocking before a release candidate. Stable combinations use explicit pins.
 
 The matrix must cover plugin discovery, no-submit command construction,
 single and combined pages, detector assets, configuration cardinality,
-combined-metafile bootstrap ambiguity, and idempotent reruns.
+standard plus calibration-marginalized sample variants, auxiliary `all.net`
+capture, combined-metafile bootstrap ambiguity, and idempotent reruns.

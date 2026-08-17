@@ -7,5 +7,10 @@ postprocessing:
   pesummary:
     multiprocess: 4
     accounting group: ligo.dev.o4.cbc.pe.rift
+    # Give standard and calibration-marginalized results distinct labels when
+    # both are present; missing optional variants are skipped.
+    sample variants: all
+    # PESummary 1.6 cannot ingest all.net, so preserve it as an auxiliary asset.
+    capture all.net: true
     additional arguments:
       publication: null

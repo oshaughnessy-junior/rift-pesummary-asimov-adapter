@@ -8,7 +8,8 @@ import os
 from pathlib import Path
 import re
 import shlex
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
+import shutil
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from asimov import config
 from asimov.pipeline import Pipeline, PipelineException
@@ -42,6 +43,18 @@ class _PESummaryInput:
     f_ref: Optional[str]
     psds: Mapping[str, str]
     calibration: Mapping[str, str]
+
+
+_SAMPLE_VARIANT_ALIASES = {
+    "preferred": "preferred",
+    "standard": "standard",
+    "raw": "standard",
+    "non-calmarg": "standard",
+    "non_calmarg": "standard",
+    "calmarg": "calmarg",
+    "calibration-marginalized": "calmarg",
+    "calibration_marginalized": "calmarg",
+}
 
 
 def _absolute(path: Any) -> str:
@@ -90,6 +103,7 @@ class RIFTPESummary(Pipeline):
         self.rundir = self._rundir()
         self.webdir = self._webdir()
         self.executable = self._executable()
+        self._resolved_assets: List[Tuple[Any, Dict[str, Any]]] = []
 
     def _settings(self) -> Dict[str, Any]:
         meta = getattr(self.production, "meta", {}) or {}
@@ -201,16 +215,97 @@ class RIFTPESummary(Pipeline):
             raise PipelineException(f"RIFT asset '{key}' must map detector names to paths")
         return {str(ifo): _absolute(path) for ifo, path in mapping.items()}
 
+    def _sample_variant_request(self) -> List[str]:
+        requested = self.meta.get("sample variants", "preferred")
+        if isinstance(requested, str):
+            requested = [requested]
+        elif isinstance(requested, Sequence) and not isinstance(
+            requested, (bytes, bytearray)
+        ):
+            requested = list(requested)
+        else:
+            raise PipelineException(
+                "'sample variants' must be 'preferred', 'all', or a list"
+            )
+
+        normalised: List[str] = []
+        for value in requested:
+            value = str(value).lower().strip()
+            if value == "all":
+                values = ["standard", "calmarg"]
+            elif value in _SAMPLE_VARIANT_ALIASES:
+                values = [_SAMPLE_VARIANT_ALIASES[value]]
+            else:
+                raise PipelineException(f"Unknown RIFT sample variant {value!r}")
+            for variant in values:
+                if variant not in normalised:
+                    normalised.append(variant)
+        return normalised
+
+    def _selected_samples(
+        self, assets: Mapping[str, Any], source_name: str
+    ) -> List[Tuple[str, str]]:
+        requested = self._sample_variant_request()
+        selected: List[Tuple[str, str]] = []
+
+        if requested == ["preferred"]:
+            preferred = _normalise_paths(
+                assets.get("samples"), field="samples", analysis=source_name
+            )
+            if len(preferred) == 1:
+                return [("preferred", preferred[0])]
+            return [
+                (f"preferred-{index}", path)
+                for index, path in enumerate(preferred, start=1)
+            ]
+
+        variant_keys = {
+            "standard": "samples_raw",
+            "calmarg": "samples_calmarg",
+        }
+        for variant in requested:
+            if variant == "preferred":
+                paths = _normalise_paths(
+                    assets.get("samples"), field="samples", analysis=source_name
+                )
+            else:
+                value = assets.get(variant_keys[variant])
+                paths = [] if value is None else _normalise_paths(
+                    value, field=variant_keys[variant], analysis=source_name
+                )
+                paths = [path for path in paths if os.path.exists(path)]
+            if not paths:
+                if len(requested) == 1:
+                    raise PipelineException(
+                        f"RIFT {source_name} has no available {variant} samples"
+                    )
+                self.logger.warning(
+                    "RIFT %s has no available %s samples; skipping that variant",
+                    source_name,
+                    variant,
+                )
+                continue
+            selected.extend((variant, path) for path in paths)
+
+        deduplicated: List[Tuple[str, str]] = []
+        seen = set()
+        for variant, path in selected:
+            if path not in seen:
+                deduplicated.append((variant, path))
+                seen.add(path)
+        if not deduplicated:
+            raise PipelineException(f"RIFT {source_name} publishes no selected samples")
+        return deduplicated
+
     def _inputs(self) -> List[_PESummaryInput]:
         inputs: List[_PESummaryInput] = []
         seen_labels = set()
         resolved = []
+        resolved_assets = []
 
         for source in self._sources():
             assets = self._source_assets(source)
-            samples = _normalise_paths(
-                assets.get("samples"), field="samples", analysis=source.name
-            )
+            samples = self._selected_samples(assets, source.name)
             configs = _normalise_paths(
                 assets.get("config"), field="config", analysis=source.name
             )
@@ -231,8 +326,15 @@ class RIFTPESummary(Pipeline):
             psds = self._detector_paths(assets, "psds")
             calibration = self._detector_paths(assets, "calibration")
 
-            for index, (sample, config_path) in enumerate(zip(samples, configs), start=1):
-                label_name = source.name if len(samples) == 1 else f"{source.name}-{index}"
+            for index, ((variant, sample), config_path) in enumerate(
+                zip(samples, configs), start=1
+            ):
+                if variant == "preferred" and len(samples) == 1:
+                    label_name = source.name
+                elif variant.startswith("preferred-"):
+                    label_name = f"{source.name}-{index}"
+                else:
+                    label_name = f"{source.name}-{variant}"
                 label = _safe_label(label_name)
                 if label in seen_labels:
                     raise PipelineException(f"Duplicate PESummary label {label!r}")
@@ -250,11 +352,34 @@ class RIFTPESummary(Pipeline):
                     )
                 )
             resolved.append(source.name)
+            resolved_assets.append((source, assets))
 
         if not inputs:
             raise PipelineException("RIFT-PESummary resolved no usable inputs")
         self.production.resolved_dependencies = resolved
+        self._resolved_assets = resolved_assets
         return inputs
+
+    def _captured_likelihood_assets(self, copy=False) -> Dict[str, str]:
+        if not self.meta.get("capture all.net", False):
+            return {}
+        if not self._resolved_assets:
+            self._inputs()
+
+        captured: Dict[str, str] = {}
+        for source, assets in self._resolved_assets:
+            original = assets.get("lnL_marg")
+            if not original or not os.path.exists(_absolute(original)):
+                self.logger.warning("RIFT %s has no available all.net", source.name)
+                continue
+            destination = os.path.join(
+                self.rundir, "auxiliary", _safe_label(source.name), "all.net"
+            )
+            captured[_safe_label(source.name)] = destination
+            if copy:
+                Path(destination).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(_absolute(original), destination)
+        return captured
 
     def _append_aligned(
         self,
@@ -381,6 +506,7 @@ class RIFTPESummary(Pipeline):
         """Materialise the reproducible command used by ASIMOV's build phase."""
         command = self.build_command()
         self._write_script(command)
+        self._captured_likelihood_assets(copy=True)
         if dryrun:
             self.logger.info(
                 "PESummary command: %s", shlex.join([self.executable, *command])
@@ -391,6 +517,7 @@ class RIFTPESummary(Pipeline):
         """Write and optionally submit the PESummary HTCondor job."""
         command = self.build_command()
         self._write_script(command)
+        self._captured_likelihood_assets(copy=True)
 
         submit_description = {
             "executable": self.executable,
@@ -437,14 +564,21 @@ class RIFTPESummary(Pipeline):
         )
 
     def collect_assets(self):
-        return {
+        assets = {
             "samples": os.path.join(
                 self.webdir, "samples", "posterior_samples.h5"
             ),
             "pages": self.webdir,
         }
+        likelihood = self._captured_likelihood_assets(copy=False)
+        if likelihood:
+            assets["likelihood"] = likelihood
+        return assets
 
     def results(self):
         """Expose the combined metafile using ASIMOV's legacy results API."""
         assets = self.collect_assets()
-        return {"metafile": assets["samples"], "pages": assets["pages"]}
+        results = {"metafile": assets["samples"], "pages": assets["pages"]}
+        if "likelihood" in assets:
+            results["likelihood"] = assets["likelihood"]
+        return results

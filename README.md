@@ -40,6 +40,34 @@ reference frequency, PSD, and calibration envelope. Detector assets use
 PESummary's per-label arguments, which avoids incorrectly sharing one RIFT
 analysis's files across a combined page.
 
+When a RIFT run publishes both `samples_raw` and `samples_calmarg`, select both
+as independently labelled PESummary analyses with:
+
+```yaml
+postprocessing:
+  pesummary:
+    sample variants: all
+```
+
+The accepted values are `preferred` (the backward-compatible default),
+`standard`, `calmarg`, `all`, or a list of those values. Missing variants are
+skipped for `all` and rejected when explicitly requested alone.
+
+RIFT also publishes its marginalized-likelihood grid as `lnL_marg`. PESummary
+1.6 has no CLI input for the RIFT `all.net` format, so the adapter does not pass
+it as posterior samples or weights. It can instead preserve and publish an
+unaltered copy alongside the postprocessing job:
+
+```yaml
+postprocessing:
+  pesummary:
+    capture all.net: true
+```
+
+The copy is exposed in `collect_assets()` and `results()` under `likelihood`.
+This keeps the data available for a future PESummary reader without coupling
+the stable adapter to an unsupported conversion.
+
 ## Compatibility policy
 
 The adapter currently targets ASIMOV 0.7 and PESummary 1.6 or newer. Both RIFT

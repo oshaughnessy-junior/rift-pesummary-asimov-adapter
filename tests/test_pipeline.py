@@ -23,7 +23,17 @@ class FakeRiftPipeline:
         return self.assets
 
 
-def source(tmp_path, name, approximant, f_low, f_ref, *, psd_suffix="shared"):
+def source(
+    tmp_path,
+    name,
+    approximant,
+    f_low,
+    f_ref,
+    *,
+    psd_suffix="shared",
+    calmarg=False,
+    likelihood_grid=False,
+):
     sample = tmp_path / f"{name}.dat"
     sample.write_text("# samples\n")
     config = tmp_path / f"{name}.ini"
@@ -35,6 +45,7 @@ def source(tmp_path, name, approximant, f_low, f_ref, *, psd_suffix="shared"):
     assets = {
         "asset_contract": "rift-assets/v1",
         "samples": [str(sample)],
+        "samples_raw": str(sample),
         "config": str(config),
         "psds": {"H1": str(psd)},
         "calibration": {"H1": str(calibration)},
@@ -44,6 +55,15 @@ def source(tmp_path, name, approximant, f_low, f_ref, *, psd_suffix="shared"):
             "analysis": name,
         },
     }
+    if calmarg:
+        calmarg_sample = tmp_path / f"{name}-calmarg.dat"
+        calmarg_sample.write_text("# calibration-marginalized samples\n")
+        assets["samples"] = [str(calmarg_sample)]
+        assets["samples_calmarg"] = str(calmarg_sample)
+    if likelihood_grid:
+        all_net = tmp_path / f"{name}-all.net"
+        all_net.write_text("# marginalized likelihood grid\n")
+        assets["lnL_marg"] = str(all_net)
     return types.SimpleNamespace(
         name=name,
         pipeline=FakeRiftPipeline(assets),
@@ -192,6 +212,48 @@ def test_multiple_samples_get_unique_aligned_labels(configured):
     assert len(values_after(command, "--config", ["--rift_multi-1_psd"])) == 2
 
 
+def test_all_sample_variants_include_standard_and_calmarg(configured):
+    analysis = source(
+        configured,
+        "rift-both",
+        "SEOBNRv5PHM",
+        20,
+        20,
+        calmarg=True,
+    )
+    prod = production(
+        configured,
+        [analysis],
+        settings={"sample variants": "all"},
+    )
+
+    command = RIFTPESummary(prod).build_command()
+
+    assert values_after(command, "--labels", ["--gw"]) == [
+        "rift-both-standard",
+        "rift-both-calmarg",
+    ]
+    assert values_after(command, "--samples", ["--config"]) == [
+        str(configured / "rift-both.dat"),
+        str(configured / "rift-both-calmarg.dat"),
+    ]
+    assert len(
+        values_after(command, "--config", ["--rift-both-standard_psd"])
+    ) == 2
+
+
+def test_explicit_missing_calmarg_is_an_error(configured):
+    analysis = source(configured, "rift-standard", "SEOBNRv5PHM", 20, 20)
+    prod = production(
+        configured,
+        [analysis],
+        settings={"sample variants": "calmarg"},
+    )
+
+    with pytest.raises(PipelineException, match="no available calmarg samples"):
+        RIFTPESummary(prod).build_command()
+
+
 def test_rejects_old_or_unknown_asset_contract(configured):
     analysis = source(configured, "rift-old", "SEOBNRv5PHM", 20, 20)
     analysis.pipeline.assets["asset_contract"] = "rift-assets/v2"
@@ -243,6 +305,31 @@ def test_build_phase_writes_script(configured):
 
     assert adapter.build_dag(dryrun=True) == 0
     assert (Path(adapter.rundir) / "pesummary.sh").exists()
+
+
+def test_optional_all_net_capture_publishes_copy(configured):
+    analysis = source(
+        configured,
+        "rift-grid",
+        "SEOBNRv5PHM",
+        20,
+        20,
+        likelihood_grid=True,
+    )
+    prod = production(
+        configured,
+        [analysis],
+        settings={"capture all.net": True},
+    )
+    adapter = RIFTPESummary(prod)
+
+    assert adapter.build_dag(dryrun=True) == 0
+    expected = Path(adapter.rundir) / "auxiliary" / "rift-grid" / "all.net"
+    assert expected.read_text() == "# marginalized likelihood grid\n"
+    assert adapter.collect_assets()["likelihood"] == {
+        "rift-grid": str(expected)
+    }
+    assert adapter.results()["likelihood"] == {"rift-grid": str(expected)}
 
 
 def test_collect_assets_and_completion_location(configured):
