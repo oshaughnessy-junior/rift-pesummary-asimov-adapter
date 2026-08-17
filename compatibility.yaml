@@ -10,5 +10,13 @@ supported:
     asimov: ">=0.7,<0.8"
     pesummary: ">=1.6"
 canary:
-  asimov: development-head
+  date: "2026-08-17"
+  asimov: "0.7.0"
+  pesummary_branch: master
+  pesummary_commit: 3bc32e9e37cb247131e8e0fccfbf283fa6e732d7
+  rift_branch: rift_O4d
+  rift_commit: 6ed3d5803ac9327d4afd17401e5251848af5e7f9
+  adapter_commit: 39a9f25c9cf0c6cbcf0451c7b410937fcd4c7086
+  result: "28 passed"
+  note: "The official ASIMOV master predates 0.7; 0.7.0 is the newest available tree."
   blocking: false
